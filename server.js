@@ -157,7 +157,7 @@ app.get('/api/analytics', (req, res) => {
   const bestTrade  = sorted[0]  || null;
   const worstTrade = sorted[sorted.length - 1] || null;
 
-  const closeReasons = { take_profit: 0, stop_loss: 0, time_stop: 0, manual: 0, other: 0 };
+  const closeReasons = { take_profit: 0, stop_loss: 0, time_stop: 0, manual: 0, paper_trade: 0, other: 0 };
   closed.forEach(t => {
     if (closeReasons[t.closeReason] !== undefined) closeReasons[t.closeReason]++;
     else closeReasons.other++;
@@ -198,6 +198,27 @@ app.get('/api/analytics', (req, res) => {
   });
 });
 
+// ─── Paper Trade Test Endpoints ────────────────────────────
+app.post('/api/paper-trade/test', (req, res) => {
+  const t = config.trading;
+  const names = ['PEPE','DOGE','WIF','BONK','MEME','SHIB','FLOKI','TURBO'];
+  const sym = names[Math.floor(Math.random()*names.length)] + Math.floor(Math.random()*999);
+  const conf = Math.floor(Math.random()*35) + 55;
+  let pct = conf >= 75 ? (Math.random()*100+20) : conf >= 65 ? (Math.random()*60-20) : (Math.random()*50-35);
+  const paper = { mint:'PAPER_'+Date.now(), symbol:sym, buySol:t.buy_amount_sol||0.1, feesPaidSol:0.0005, buyTime:Date.now()-120000, sellTime:Date.now(), aiConfidence:conf, closeReason:'paper_trade', pnlPct:pct, pnlSol:(pct/100)*(t.buy_amount_sol||0.1), status:'paper' };
+  trades.push(paper); saveTrades(); totalProfit += paper.pnlSol;
+  io.emit('tradeClosed', paper); io.emit('statsUpdate', { totalProfit, tradeCount: trades.length });
+  log('[TEST PAPER] ' + sym + ' ' + (pct>=0?'+':'') + pct.toFixed(1) + '% AI:' + conf + '%');
+  res.json({ success:true, trade:paper });
+});
+app.post('/api/paper-trade/clear', (req, res) => {
+  const before = trades.length;
+  trades = trades.filter(t => t.status !== 'paper');
+  totalProfit = trades.reduce((s,t) => s+(t.pnlSol||0), 0);
+  saveTrades(); io.emit('statsUpdate', { totalProfit, tradeCount:trades.length });
+  res.json({ success:true, cleared:before-trades.length });
+});
+
 // ─── Config & Trade I/O ─────────────────────────────────────
 function loadConfig() {
   try {
@@ -227,7 +248,7 @@ function defaultConfig() {
   return {
     solana:    { rpc_url: 'https://api.mainnet-beta.solana.com', private_key: '', wallet_address: '' },
     deepseek:  { api_key: '', model: 'deepseek-chat', base_url: 'https://api.deepseek.com/v1' },
-    trading:   { buy_amount_sol: 0.1, slippage_bps: 1500, take_profit_percent: 150, stop_loss_percent: 35, time_stop_minutes: 45, max_active_trades: 5, min_liquidity_sol: 5, min_market_cap_usd: 5000, max_market_cap_usd: 500000, ai_confidence_threshold: 65, priority_fee_lamports: 100000, auto_trade: false, require_mint_disabled: true, require_freeze_disabled: true, max_token_age_seconds: 1800 },
+    trading:   { buy_amount_sol: 0.1, slippage_bps: 1500, take_profit_percent: 150, stop_loss_percent: 35, time_stop_minutes: 45, max_active_trades: 5, min_liquidity_sol: 5, min_market_cap_usd: 1000, max_market_cap_usd: 500000, ai_confidence_threshold: 60, priority_fee_lamports: 100000, auto_trade: false, require_mint_disabled: true, require_freeze_disabled: true, max_token_age_seconds: 1800 },
     monitoring:{ new_token_check_interval_ms: 8000, position_check_interval_ms: 12000, pump_fun_limit: 20 }
   };
 }
