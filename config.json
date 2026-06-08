@@ -1,0 +1,34 @@
+{
+  "solana": {
+    "rpc_url": "https://solana-mainnet.g.alchemy.com/v2/bJ-yVHrj2ef3z4cChDK_g",
+    "private_key": "",
+    "wallet_address": ""
+  },
+  "deepseek": {
+    "api_key": "",
+    "model": "deepseek-chat",
+    "base_url": "https://api.deepseek.com/v1"
+  },
+  "trading": {
+    "buy_amount_sol": 0.1,
+    "slippage_bps": 1500,
+    "take_profit_percent": 150,
+    "stop_loss_percent": 35,
+    "time_stop_minutes": 45,
+    "max_active_trades": 5,
+    "min_liquidity_sol": 5,
+    "min_market_cap_usd": 5000,
+    "max_market_cap_usd": 500000,
+    "ai_confidence_threshold": 65,
+    "priority_fee_lamports": 100000,
+    "auto_trade": false,
+    "require_mint_disabled": true,
+    "require_freeze_disabled": true,
+    "max_token_age_seconds": 120
+  },
+  "monitoring": {
+    "new_token_check_interval_ms": 8000,
+    "position_check_interval_ms": 12000,
+    "pump_fun_limit": 20
+  }
+}

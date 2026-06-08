@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>🚀 Memecoin Sniper Bot</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
+<style>
+  :root{
+    --bg:#0a0b0f; --card:#12141a; --border:#1e2130; --accent:#6c63ff;
+    --green:#00e676; --red:#ff5252; --yellow:#ffd740; --text:#e0e0e0;
+    --sub:#8892b0; --header:#1a1c25;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;font-size:14px;min-height:100vh;}
+  /* ─── Header ─── */
+  .header{background:var(--header);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+  .logo{font-size:20px;font-weight:700;letter-spacing:-.5px;}
+  .logo span{color:var(--accent);}
+  .wallet-info{flex:1;display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+  .wallet-addr{font-size:12px;color:var(--sub);font-family:monospace;background:var(--bg);padding:4px 10px;border-radius:6px;}
+  .balance{font-weight:600;color:var(--yellow);}
+  .bot-toggle{margin-left:auto;display:flex;align-items:center;gap:10px;}
+  .btn{border:none;cursor:pointer;border-radius:8px;padding:9px 20px;font-size:13px;font-weight:600;transition:.15s;}
+  .btn-start{background:var(--green);color:#000;}
+  .btn-stop{background:var(--red);color:#fff;}
+  .btn-start:hover{filter:brightness(1.1);}
+  .btn-stop:hover{filter:brightness(1.1);}
+  .btn-sm{padding:5px 12px;font-size:12px;}
+  .btn-outline{background:transparent;border:1px solid var(--border);color:var(--text);}
+  .btn-outline:hover{border-color:var(--accent);color:var(--accent);}
+  .status-dot{width:9px;height:9px;border-radius:50%;background:var(--red);}
+  .status-dot.on{background:var(--green);box-shadow:0 0 8px var(--green);}
+  /* ─── Tabs ─── */
+  .tabs{display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--header);padding:0 24px;}
+  .tab{padding:12px 20px;cursor:pointer;color:var(--sub);font-size:13px;font-weight:500;border-bottom:2px solid transparent;transition:.15s;}
+  .tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+  .tab:hover:not(.active){color:var(--text);}
+  /* ─── Main ─── */
+  .main{padding:20px 24px;max-width:1600px;margin:0 auto;}
+  /* ─── Stats Cards ─── */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px;margin-bottom:20px;}
+  .stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 18px;}
+  .stat-label{font-size:11px;color:var(--sub);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;}
+  .stat-val{font-size:24px;font-weight:700;}
+  .stat-sub{font-size:11px;color:var(--sub);margin-top:3px;}
+  .pos{color:var(--green);}
+  .neg{color:var(--red);}
+  .neu{color:var(--text);}
+  /* ─── Grid ─── */
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;}
+  @media(max-width:900px){.grid-2{grid-template-columns:1fr;}}
+  /* ─── Card ─── */
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+  .card-hd{padding:13px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
+  .card-title{font-size:13px;font-weight:600;color:var(--text);}
+  .badge{background:var(--accent);color:#fff;border-radius:20px;padding:1px 8px;font-size:11px;font-weight:600;}
+  /* ─── Table ─── */
+  .tbl-wrap{overflow-x:auto;max-height:340px;overflow-y:auto;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th{background:var(--bg);color:var(--sub);text-align:left;padding:8px 12px;font-weight:500;position:sticky;top:0;z-index:1;}
+  td{padding:8px 12px;border-bottom:1px solid var(--border);}
+  tr:hover td{background:rgba(108,99,255,.05);}
+  tr:last-child td{border-bottom:none;}
+  .mono{font-family:monospace;font-size:11px;}
+  .chip{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;}
+  .chip-active{background:rgba(0,230,118,.15);color:var(--green);}
+  .chip-profit{background:rgba(0,230,118,.15);color:var(--green);}
+  .chip-loss{background:rgba(255,82,82,.15);color:var(--red);}
+  .chip-buy{background:rgba(108,99,255,.15);color:var(--accent);}
+  .chip-skip{background:rgba(136,146,176,.1);color:var(--sub);}
+  /* ─── AI Feed ─── */
+  .ai-feed{display:flex;flex-direction:column;gap:8px;padding:12px;max-height:320px;overflow-y:auto;}
+  .ai-item{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;}
+  .ai-item.buy{border-left:3px solid var(--green);}
+  .ai-item.skip{border-left:3px solid var(--border);}
+  .ai-top{display:flex;align-items:center;gap:8px;margin-bottom:4px;}
+  .ai-sym{font-weight:700;font-size:13px;}
+  .ai-conf{font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600;}
+  .ai-conf.high{background:rgba(0,230,118,.2);color:var(--green);}
+  .ai-conf.med{background:rgba(255,215,64,.2);color:var(--yellow);}
+  .ai-conf.low{background:rgba(255,82,82,.2);color:var(--red);}
+  .ai-reason{color:var(--sub);font-size:11px;}
+  .ai-meta{color:var(--sub);font-size:10px;margin-top:4px;}
+  /* ─── Log ─── */
+  .log-box{padding:12px;max-height:260px;overflow-y:auto;font-family:monospace;font-size:11px;line-height:1.7;}
+  .log-line{color:var(--sub);}
+  .log-line.err{color:var(--red);}
+  .log-line.ok{color:var(--green);}
+  .log-line.warn{color:var(--yellow);}
+  .log-time{color:#3a4060;margin-right:6px;}
+  /* ─── Config Tab ─── */
+  .cfg-wrap{max-width:700px;margin:0 auto;padding:10px 0;}
+  .cfg-section{margin-bottom:28px;}
+  .cfg-section-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--accent);margin-bottom:14px;padding-bottom:6px;border-bottom:1px solid var(--border);}
+  .cfg-row{display:grid;grid-template-columns:200px 1fr;align-items:center;gap:12px;margin-bottom:12px;}
+  label{font-size:12px;color:var(--sub);}
+  input[type=text],input[type=number],input[type=password]{background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:8px 12px;font-size:13px;width:100%;transition:.15s;}
+  input:focus{outline:none;border-color:var(--accent);}
+  .toggle-row{display:flex;align-items:center;gap:10px;}
+  .toggle{position:relative;width:44px;height:24px;cursor:pointer;}
+  .toggle input{opacity:0;width:0;height:0;}
+  .slider{position:absolute;inset:0;background:#333;border-radius:24px;transition:.2s;}
+  .slider:before{content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s;}
+  input:checked+.slider{background:var(--accent);}
+  input:checked+.slider:before{transform:translateX(20px);}
+  .cfg-hint{font-size:11px;color:var(--sub);margin-top:3px;}
+  .btn-save{background:var(--accent);color:#fff;padding:10px 28px;border-radius:8px;border:none;cursor:pointer;font-size:14px;font-weight:600;width:100%;margin-top:8px;transition:.15s;}
+  .btn-save:hover{filter:brightness(1.1);}
+  .save-msg{text-align:center;margin-top:8px;font-size:12px;min-height:16px;}
+  /* ─── Progress bar for P&L ─── */
+  .pnl-bar-wrap{background:var(--bg);border-radius:4px;height:4px;width:80px;overflow:hidden;display:inline-block;vertical-align:middle;margin-left:6px;}
+  .pnl-bar{height:100%;border-radius:4px;transition:.3s;}
+  /* ─── Empty state ─── */
+  .empty{text-align:center;color:var(--sub);padding:40px 20px;font-size:13px;}
+  /* ─── Page sections ─── */
+  .page{display:none;}.page.active{display:block;}
+  /* ─── Notification ─── */
+  .notif{position:fixed;top:16px;right:16px;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px 18px;font-size:13px;z-index:999;transform:translateY(-80px);transition:.3s;max-width:320px;}
+  .notif.show{transform:translateY(0);}
+  .notif.profit{border-left:3px solid var(--green);}
+  .notif.loss{border-left:3px solid var(--red);}
+  /* scrollbar */
+  ::-webkit-scrollbar{width:5px;height:5px;}
+  ::-webkit-scrollbar-track{background:var(--bg);}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+</style>
+</head>
+<body>
+
+<!-- Notification -->
+<div class="notif" id="notif"></div>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">🚀 Meme<span>Sniper</span></div>
+  <div class="wallet-info">
+    <div class="wallet-addr" id="walletAddr">Not configured</div>
+    <div class="balance" id="walletBal">0.000 SOL</div>
+  </div>
+  <div class="bot-toggle">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText" style="font-size:12px;color:var(--sub)">Stopped</span>
+    <button class="btn btn-start" id="btnStart" onclick="startBot()">▶ Start Bot</button>
+    <button class="btn btn-stop" id="btnStop" onclick="stopBot()" style="display:none">⏹ Stop Bot</button>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <div class="tab active" onclick="showTab('dashboard',this)">📊 Dashboard</div>
+  <div class="tab" onclick="showTab('positions',this)">💼 Active Positions</div>
+  <div class="tab" onclick="showTab('history',this)">📜 Trade History</div>
+  <div class="tab" onclick="showTab('ai',this)">🧠 AI Feed</div>
+  <div class="tab" onclick="showTab('log',this)">🖥 Bot Log</div>
+  <div class="tab" onclick="showTab('config',this)">⚙️ Config</div>
+</div>
+
+<!-- ═══ DASHBOARD ═══ -->
+<div class="main">
+<div class="page active" id="page-dashboard">
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Total Profit</div>
+      <div class="stat-val" id="totalProfit">0.000 SOL</div>
+      <div class="stat-sub" id="totalProfitUsd">≈ $0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Win Rate</div>
+      <div class="stat-val" id="winRate">0%</div>
+      <div class="stat-sub" id="winLoss">0W / 0L</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Active Trades</div>
+      <div class="stat-val" id="activeCnt">0</div>
+      <div class="stat-sub">Max <span id="maxTrades">5</span></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Total Trades</div>
+      <div class="stat-val" id="totalTrades">0</div>
+      <div class="stat-sub" id="tradeSub">Today: 0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Wallet Balance</div>
+      <div class="stat-val" id="balCard">0.000</div>
+      <div class="stat-sub">SOL</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Tokens Analyzed</div>
+      <div class="stat-val" id="aiAnalyzedCnt">0</div>
+      <div class="stat-sub" id="aiBuyCnt">AI buys: 0</div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <!-- Active Positions preview -->
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">Active Positions</span>
+        <span class="badge" id="activeBadge">0</span>
+      </div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Token</th><th>Invested</th><th>P&L</th><th>Action</th></tr></thead>
+          <tbody id="activeTableDash"><tr><td colspan="4" class="empty">No active trades</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <!-- AI feed preview -->
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">AI Analysis Feed</span>
+        <span style="font-size:11px;color:var(--sub)" id="aiStatus">Waiting...</span>
+      </div>
+      <div class="ai-feed" id="aiFeedDash"></div>
+    </div>
+  </div>
+
+  <!-- Recent trades -->
+  <div class="card">
+    <div class="card-hd">
+      <span class="card-title">Recent Closed Trades</span>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Token</th><th>Invested</th><th>Sold</th><th>Fees</th><th>Net P&L SOL</th><th>Net P&L %</th><th>Reason</th><th>Time</th></tr></thead>
+        <tbody id="recentTradesTable"><tr><td colspan="8" class="empty">No closed trades yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══ ACTIVE POSITIONS ═══ -->
+<div class="page" id="page-positions">
+  <div class="card">
+    <div class="card-hd">
+      <span class="card-title">All Active Positions</span>
+      <span class="badge" id="activeBadge2">0</span>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Token</th><th>Bought (SOL)</th><th>Fees Paid</th>
+            <th>Buy Price</th><th>Current Price</th>
+            <th>P&L SOL</th><th>P&L %</th>
+            <th>TP / SL</th><th>Age</th><th>AI</th><th>Sell</th>
+          </tr>
+        </thead>
+        <tbody id="positionsTable"><tr><td colspan="11" class="empty">No active positions</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ TRADE HISTORY ═══ -->
+<div class="page" id="page-history">
+  <div class="card">
+    <div class="card-hd">
+      <span class="card-title">Full Trade History</span>
+    </div>
+    <div class="tbl-wrap" style="max-height:600px;">
+      <table>
+        <thead>
+          <tr>
+            <th>Token</th><th>Invested</th><th>Gross Out</th>
+            <th>Buy Fees</th><th>Sell Fees</th><th>Net P&L SOL</th><th>Net P&L %</th>
+            <th>Reason</th><th>Duration</th><th>AI Conf</th><th>TX</th>
+          </tr>
+        </thead>
+        <tbody id="historyTable"><tr><td colspan="11" class="empty">No trade history yet</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ AI FEED ═══ -->
+<div class="page" id="page-ai">
+  <div class="card">
+    <div class="card-hd">
+      <span class="card-title">DeepSeek AI Analysis — All Tokens</span>
+      <span style="font-size:11px;color:var(--sub)">Live feed of every token analyzed</span>
+    </div>
+    <div class="ai-feed" id="aiFeedFull" style="max-height:700px;"></div>
+  </div>
+</div>
+
+<!-- ═══ LOG ═══ -->
+<div class="page" id="page-log">
+  <div class="card">
+    <div class="card-hd">
+      <span class="card-title">Bot Log</span>
+      <button class="btn btn-sm btn-outline" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="log-box" id="logBox"></div>
+  </div>
+</div>
+
+<!-- ═══ CONFIG ═══ -->
+<div class="page" id="page-config">
+  <div class="cfg-wrap">
+    <div class="card" style="padding:20px 24px;">
+
+      <!-- Solana -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">🔑 Solana Wallet</div>
+        <div class="cfg-row">
+          <label>Private Key <span style="color:var(--red)">*</span></label>
+          <div>
+            <input type="password" id="cfg_pk" placeholder="Your base58 wallet private key"/>
+            <div class="cfg-hint">⚠️ Never share this. Stored only on your server.</div>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>RPC URL</label>
+          <div>
+            <input type="text" id="cfg_rpc" placeholder="https://api.mainnet-beta.solana.com"/>
+            <div class="cfg-hint">Use Helius or QuickNode for faster sniping.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DeepSeek -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">🧠 DeepSeek AI</div>
+        <div class="cfg-row">
+          <label>API Key <span style="color:var(--red)">*</span></label>
+          <input type="password" id="cfg_dskey" placeholder="sk-..."/>
+        </div>
+        <div class="cfg-row">
+          <label>Model</label>
+          <input type="text" id="cfg_dsmodel" placeholder="deepseek-chat"/>
+        </div>
+      </div>
+
+      <!-- Trading -->
+      <div class="cfg-section">
+        <div class="cfg-section-title">📈 Trading Settings</div>
+        <div class="cfg-row">
+          <label>Buy Amount (SOL)</label>
+          <div>
+            <input type="number" id="cfg_buyamt" step="0.01" min="0.01" placeholder="0.1"/>
+            <div class="cfg-hint">Amount of SOL to spend per trade.</div>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>Slippage (BPS)</label>
+          <div>
+            <input type="number" id="cfg_slip" step="100" min="100" placeholder="1500"/>
+            <div class="cfg-hint">1500 = 15% slippage. New tokens need high slippage.</div>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>Take Profit %</label>
+          <div>
+            <input type="number" id="cfg_tp" step="10" min="10" placeholder="150"/>
+            <div class="cfg-hint">Auto-sell when trade is up this much (e.g. 150 = 2.5x).</div>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>Stop Loss %</label>
+          <div>
+            <input type="number" id="cfg_sl" step="5" min="5" placeholder="35"/>
+            <div class="cfg-hint">Auto-sell to cut losses at this % down.</div>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>Time Stop (min)</label>
+          <div>
+            <input type="number" id="cfg_time" step="5" min="5" placeholder="45"/>
+            <div class="cfg-hint">Force sell after this many minutes if no TP/SL hit.</div>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>Max Active Trades</label>
+          <input type="number" id="cfg_maxtr" step="1" min="1" max="20" placeholder="5"/>
+        </div>
+        <div class="cfg-row">
+          <label>Min Liquidity (SOL)</label>
+          <input type="number" id="cfg_minliq" step="1" min="1" placeholder="5"/>
+        </div>
+        <div class="cfg-row">
+          <label>Min Market Cap ($)</label>
+          <input type="number" id="cfg_minmc" step="1000" min="100" placeholder="5000"/>
+        </div>
+        <div class="cfg-row">
+          <label>Max Market Cap ($)</label>
+          <input type="number" id="cfg_maxmc" step="10000" min="1000" placeholder="500000"/>
+        </div>
+        <div class="cfg-row">
+          <label>AI Confidence Min %</label>
+          <div>
+            <input type="number" id="cfg_aiconf" step="5" min="10" max="100" placeholder="65"/>
+            <div class="cfg-hint">Only buy if AI is at least this confident.</div>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>Max Token Age (sec)</label>
+          <div>
+            <input type="number" id="cfg_age" step="10" min="10" placeholder="120"/>
+            <div class="cfg-hint">Only snipe tokens newer than this.</div>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>Priority Fee (lamports)</label>
+          <div>
+            <input type="number" id="cfg_prio" step="10000" min="0" placeholder="100000"/>
+            <div class="cfg-hint">Higher = faster inclusion. 100000 = ~0.0001 SOL extra.</div>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>Auto-Trade</label>
+          <div class="toggle-row">
+            <label class="toggle">
+              <input type="checkbox" id="cfg_auto" onchange="updateAutoLabel()"/>
+              <span class="slider"></span>
+            </label>
+            <span id="autoLabel" style="font-size:12px;color:var(--sub)">OFF — AI analyzes but won't buy</span>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <label>Require Mint Disabled</label>
+          <label class="toggle">
+            <input type="checkbox" id="cfg_mint"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+        <div class="cfg-row">
+          <label>Require Freeze Disabled</label>
+          <label class="toggle">
+            <input type="checkbox" id="cfg_freeze"/>
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <button class="btn-save" onclick="saveConfig()">💾 Save Config</button>
+      <div class="save-msg" id="saveMsg"></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<script>
+// ─── Socket.io ───────────────────────────────────────────────
+const socket = io();
+let solPrice  = 150; // rough SOL/USD for display
+let aiCount   = 0;
+let aiBuyCount= 0;
+let allTrades = [];
+let allActive = {};
+let allAI     = [];
+
+// Fetch SOL price roughly
+fetch('https://price.jup.ag/v4/price?ids=So11111111111111111111111111111111111111112')
+  .then(r=>r.json()).then(d=>{ solPrice = d?.data?.['So11111111111111111111111111111111111111112']?.price || 150; }).catch(()=>{});
+
+socket.on('botStatus',  d => setBotStatus(d.running));
+socket.on('balance',    b => updateBalance(b));
+socket.on('statsUpdate',d => updateStats(d));
+socket.on('activeTrades', arr => { allActive={}; arr.forEach(t=>{ allActive[t.mint]=t; }); renderActive(); });
+socket.on('recentTrades', arr => { allTrades=arr; renderHistory(arr); renderRecentDash(arr); });
+socket.on('newTrade',   t => { allActive[t.mint]=t; renderActive(); notify(`🛒 Bought ${t.symbol} — ${t.buySol} SOL`, 'profit'); });
+socket.on('tradeUpdate',t => { allActive[t.mint]=t; renderActive(); });
+socket.on('tradeClosed',t => {
+  delete allActive[t.mint];
+  allTrades.unshift(t);
+  renderActive();
+  renderHistory(allTrades);
+  renderRecentDash(allTrades);
+  notify(`${t.pnlSol>0?'✅':'❌'} ${t.symbol}: ${t.pnlSol>=0?'+':''}${t.pnlSol.toFixed(4)} SOL (${t.pnlPct.toFixed(1)}%)`, t.pnlSol>0?'profit':'loss');
+});
+socket.on('aiAnalysis', d => { aiCount++; if(d.decision==='BUY') aiBuyCount++; allAI.unshift(d); renderAIItem(d,'aiFeedDash'); renderAIItem(d,'aiFeedFull'); document.getElementById('aiAnalyzedCnt').textContent=aiCount; document.getElementById('aiBuyCnt').textContent=`AI buys: ${aiBuyCount}`; document.getElementById('aiStatus').textContent=`Last: ${d.symbol}`; });
+socket.on('log', line => appendLog(line));
+socket.on('logHistory', lines => { lines.forEach(appendLog); });
+
+// ─── UI Updates ──────────────────────────────────────────────
+function setBotStatus(running) {
+  document.getElementById('statusDot').className = 'status-dot' + (running?' on':'');
+  document.getElementById('statusText').textContent= running ? 'Running' : 'Stopped';
+  document.getElementById('btnStart').style.display = running ? 'none' : '';
+  document.getElementById('btnStop').style.display  = running ? ''     : 'none';
+}
+
+function updateBalance(b) {
+  const fmt = parseFloat(b).toFixed(4);
+  document.getElementById('walletBal').textContent = fmt + ' SOL';
+  document.getElementById('balCard').textContent   = fmt;
+}
+
+function updateStats(d) {
+  if (d.totalProfit !== undefined) {
+    const p = parseFloat(d.totalProfit);
+    const el= document.getElementById('totalProfit');
+    el.textContent = (p>=0?'+':'')+p.toFixed(6)+' SOL';
+    el.className   = 'stat-val '+(p>=0?'pos':'neg');
+    document.getElementById('totalProfitUsd').textContent = '≈ $'+(Math.abs(p)*solPrice).toFixed(2);
+  }
+  if (d.tradeCount !== undefined) {
+    document.getElementById('totalTrades').textContent = d.tradeCount;
+  }
+}
+
+function updateWinRate() {
+  const wins  = allTrades.filter(t=>t.pnlSol>0).length;
+  const losses= allTrades.filter(t=>t.pnlSol<=0).length;
+  const total = wins+losses;
+  document.getElementById('winRate').textContent  = total ? Math.round(wins/total*100)+'%' : '0%';
+  document.getElementById('winLoss').textContent  = `${wins}W / ${losses}L`;
+}
+
+// ─── Active Positions Rendering ──────────────────────────────
+function renderActive() {
+  const arr = Object.values(allActive);
+  document.getElementById('activeBadge').textContent  = arr.length;
+  document.getElementById('activeBadge2').textContent = arr.length;
+  document.getElementById('activeCnt').textContent    = arr.length;
+  renderActiveTable('activeTableDash',  arr, true);
+  renderActiveTable('positionsTable',   arr, false);
+}
+
+function renderActiveTable(id, arr, compact) {
+  const tbody = document.getElementById(id);
+  if (!arr.length) { tbody.innerHTML='<tr><td colspan="20" class="empty">No active positions</td></tr>'; return; }
+  tbody.innerHTML = arr.map(t => {
+    const pnlCls = t.pnlSol>=0 ? 'pos' : 'neg';
+    const age    = Math.round((Date.now()-t.buyTime)/60000);
+    const bar    = Math.min(100, Math.abs(t.pnlPct));
+    const barClr = t.pnlSol>=0 ? 'var(--green)' : 'var(--red)';
+    if (compact) return `<tr>
+      <td><b>${t.symbol}</b></td>
+      <td>${t.buySol} SOL</td>
+      <td class="${pnlCls}">${t.pnlSol>=0?'+':''}${(t.pnlSol||0).toFixed(4)} SOL<div class="pnl-bar-wrap"><div class="pnl-bar" style="width:${bar}%;background:${barClr}"></div></div></td>
+      <td><button class="btn btn-sm btn-outline" onclick="manualSell('${t.mint}','${t.symbol}')">Sell</button></td>
+    </tr>`;
+    return `<tr>
+      <td><b>${t.symbol}</b><br/><span class="mono" style="font-size:9px">${t.mint.slice(0,10)}...</span></td>
+      <td>${t.buySol} SOL</td>
+      <td class="neg">${(t.feesPaidSol||0).toFixed(6)}</td>
+      <td class="mono">${(t.buyPriceSOL||0).toFixed(10)}</td>
+      <td class="mono">${(t.currentPriceSol||0).toFixed(10)}</td>
+      <td class="${pnlCls}">${t.pnlSol>=0?'+':''}${(t.pnlSol||0).toFixed(6)}</td>
+      <td class="${pnlCls}">${(t.pnlPct||0).toFixed(1)}%</td>
+      <td style="font-size:11px">TP:+${t.takeProfitPct}% / SL:-${t.stopLossPct}%</td>
+      <td>${age}m</td>
+      <td>${t.aiConfidence||0}%</td>
+      <td><button class="btn btn-sm btn-outline" onclick="manualSell('${t.mint}','${t.symbol}')">Sell</button></td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── History Rendering ───────────────────────────────────────
+function renderHistory(arr) {
+  updateWinRate();
+  const tbody = document.getElementById('historyTable');
+  if (!arr.length) { tbody.innerHTML='<tr><td colspan="11" class="empty">No trade history yet</td></tr>'; return; }
+  tbody.innerHTML = arr.slice(0,100).map(t => {
+    const pnlCls = t.pnlSol>=0 ? 'pos' : 'neg';
+    const dur    = t.sellTime ? Math.round((t.sellTime-t.buyTime)/60000)+'m' : '-';
+    const reasonChip = { take_profit:'🎯 TP', stop_loss:'🛑 SL', time_stop:'⏰ Time', manual:'👆 Manual' };
+    const chip   = t.status==='profit' ? 'chip-profit' : 'chip-loss';
+    const totalFees = (t.feesPaidSol||0)*2; // rough buy+sell fees
+    return `<tr>
+      <td><b>${t.symbol}</b></td>
+      <td>${t.buySol} SOL</td>
+      <td>${t.pnlSol>=0 ? (parseFloat(t.buySol)+t.pnlSol+totalFees).toFixed(6) : '—'} SOL</td>
+      <td class="neg">${(t.feesPaidSol||0).toFixed(6)}</td>
+      <td class="neg">~${(t.feesPaidSol||0).toFixed(6)}</td>
+      <td class="${pnlCls}">${t.pnlSol>=0?'+':''}${(t.pnlSol||0).toFixed(6)}</td>
+      <td class="${pnlCls}">${(t.pnlPct||0).toFixed(1)}%</td>
+      <td><span class="chip ${chip}">${reasonChip[t.closeReason]||t.closeReason||'?'}</span></td>
+      <td>${dur}</td>
+      <td>${t.aiConfidence||0}%</td>
+      <td>${t.sellTxId ? `<a href="https://solscan.io/tx/${t.sellTxId}" target="_blank" style="color:var(--accent);font-size:10px;font-family:monospace">${t.sellTxId.slice(0,8)}...</a>` : '-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderRecentDash(arr) {
+  const tbody = document.getElementById('recentTradesTable');
+  const slice = arr.slice(0,8);
+  if (!slice.length) { tbody.innerHTML='<tr><td colspan="8" class="empty">No closed trades yet</td></tr>'; return; }
+  const reasonChip = { take_profit:'🎯 TP', stop_loss:'🛑 SL', time_stop:'⏰ Time', manual:'👆 Manual' };
+  tbody.innerHTML = slice.map(t => {
+    const pnlCls = t.pnlSol>=0 ? 'pos' : 'neg';
+    const totalFees = (t.feesPaidSol||0)*2;
+    return `<tr>
+      <td><b>${t.symbol}</b></td>
+      <td>${t.buySol} SOL</td>
+      <td>${t.pnlSol>=0 ? (parseFloat(t.buySol)+t.pnlSol+totalFees).toFixed(4) : '—'} SOL</td>
+      <td class="neg">~${((t.feesPaidSol||0)*2).toFixed(6)} SOL</td>
+      <td class="${pnlCls}">${t.pnlSol>=0?'+':''}${(t.pnlSol||0).toFixed(6)} SOL</td>
+      <td class="${pnlCls}">${(t.pnlPct||0).toFixed(1)}%</td>
+      <td>${reasonChip[t.closeReason]||t.closeReason||'?'}</td>
+      <td style="font-size:10px;color:var(--sub)">${t.sellTime ? new Date(t.sellTime).toLocaleTimeString() : '-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ─── AI Feed Rendering ───────────────────────────────────────
+function renderAIItem(d, containerId) {
+  const el  = document.getElementById(containerId);
+  const isBuy = d.decision === 'BUY';
+  const confCls = d.confidence>=70 ? 'high' : d.confidence>=50 ? 'med' : 'low';
+  const item = document.createElement('div');
+  item.className = 'ai-item '+(isBuy?'buy':'skip');
+  item.innerHTML = `
+    <div class="ai-top">
+      <span class="ai-sym">${d.symbol||d.mint.slice(0,8)}</span>
+      <span class="chip ${isBuy?'chip-buy':'chip-skip'}">${d.decision}</span>
+      <span class="ai-conf ${confCls}">${d.confidence}%</span>
+    </div>
+    <div class="ai-reason">${d.reason}</div>
+    <div class="ai-meta">MC: $${(d.mcUsd||0).toFixed(0)} · Liq: ${(d.liqSol||0).toFixed(2)} SOL · ${new Date(d.time).toLocaleTimeString()}</div>`;
+  el.prepend(item);
+  // Max 50 items
+  while (el.children.length > 50) el.removeChild(el.lastChild);
+}
+
+// ─── Log ─────────────────────────────────────────────────────
+function appendLog(line) {
+  const box = document.getElementById('logBox');
+  const div = document.createElement('div');
+  const msg = line.msg || '';
+  let cls = 'log-line';
+  if (msg.includes('❌')||msg.includes('error')||msg.includes('Error')) cls+=' err';
+  else if (msg.includes('✅')||msg.includes('BUY confirmed')||msg.includes('SELL confirmed')) cls+=' ok';
+  else if (msg.includes('⚠️')||msg.includes('🚫')) cls+=' warn';
+  const t = new Date(line.time).toLocaleTimeString();
+  div.className = cls;
+  div.innerHTML = `<span class="log-time">${t}</span>${escHtml(msg)}`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+  while (box.children.length > 200) box.removeChild(box.firstChild);
+}
+function clearLog() { document.getElementById('logBox').innerHTML=''; }
+function escHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ─── Bot Control ─────────────────────────────────────────────
+async function startBot() {
+  const res = await api('/api/bot/start','POST');
+  if (!res.success) alert('❌ ' + res.message);
+}
+async function stopBot() {
+  await api('/api/bot/stop','POST');
+}
+async function manualSell(mint, symbol) {
+  if (!confirm(`Sell ${symbol} now?`)) return;
+  const res = await api(`/api/sell/${mint}`, 'POST');
+  if (!res.success) alert('❌ ' + res.message);
+}
+
+// ─── Config ──────────────────────────────────────────────────
+async function loadConfig() {
+  const cfg = await api('/api/config','GET');
+  if (!cfg) return;
+  document.getElementById('cfg_pk').placeholder     = cfg.solana?.private_key || 'Enter private key';
+  document.getElementById('cfg_rpc').value          = cfg.solana?.rpc_url || '';
+  document.getElementById('cfg_dskey').placeholder  = cfg.deepseek?.api_key || 'Enter DeepSeek API key';
+  document.getElementById('cfg_dsmodel').value      = cfg.deepseek?.model || 'deepseek-chat';
+  const t = cfg.trading || {};
+  document.getElementById('cfg_buyamt').value = t.buy_amount_sol;
+  document.getElementById('cfg_slip').value   = t.slippage_bps;
+  document.getElementById('cfg_tp').value     = t.take_profit_percent;
+  document.getElementById('cfg_sl').value     = t.stop_loss_percent;
+  document.getElementById('cfg_time').value   = t.time_stop_minutes;
+  document.getElementById('cfg_maxtr').value  = t.max_active_trades;
+  document.getElementById('cfg_minliq').value = t.min_liquidity_sol;
+  document.getElementById('cfg_minmc').value  = t.min_market_cap_usd;
+  document.getElementById('cfg_maxmc').value  = t.max_market_cap_usd;
+  document.getElementById('cfg_aiconf').value = t.ai_confidence_threshold;
+  document.getElementById('cfg_age').value    = t.max_token_age_seconds;
+  document.getElementById('cfg_prio').value   = t.priority_fee_lamports;
+  document.getElementById('cfg_auto').checked = !!t.auto_trade;
+  document.getElementById('cfg_mint').checked = !!t.require_mint_disabled;
+  document.getElementById('cfg_freeze').checked= !!t.require_freeze_disabled;
+  document.getElementById('maxTrades').textContent = t.max_active_trades||5;
+  updateAutoLabel();
+}
+
+function updateAutoLabel() {
+  const on = document.getElementById('cfg_auto').checked;
+  document.getElementById('autoLabel').textContent = on ? '🟢 ON — Bot will auto-buy AI-approved tokens' : 'OFF — AI analyzes but won\'t buy';
+  document.getElementById('autoLabel').style.color = on ? 'var(--green)' : 'var(--sub)';
+}
+
+async function saveConfig() {
+  const pk  = document.getElementById('cfg_pk').value.trim();
+  const dk  = document.getElementById('cfg_dskey').value.trim();
+  const body = {
+    solana:  {
+      rpc_url    : document.getElementById('cfg_rpc').value.trim(),
+      ...(pk && !pk.includes('••') ? { private_key: pk } : {})
+    },
+    deepseek:{
+      ...(dk && !dk.includes('••') ? { api_key: dk } : {}),
+      model: document.getElementById('cfg_dsmodel').value.trim()
+    },
+    trading:{
+      buy_amount_sol      : +document.getElementById('cfg_buyamt').value,
+      slippage_bps        : +document.getElementById('cfg_slip').value,
+      take_profit_percent : +document.getElementById('cfg_tp').value,
+      stop_loss_percent   : +document.getElementById('cfg_sl').value,
+      time_stop_minutes   : +document.getElementById('cfg_time').value,
+      max_active_trades   : +document.getElementById('cfg_maxtr').value,
+      min_liquidity_sol   : +document.getElementById('cfg_minliq').value,
+      min_market_cap_usd  : +document.getElementById('cfg_minmc').value,
+      max_market_cap_usd  : +document.getElementById('cfg_maxmc').value,
+      ai_confidence_threshold : +document.getElementById('cfg_aiconf').value,
+      max_token_age_seconds   : +document.getElementById('cfg_age').value,
+      priority_fee_lamports   : +document.getElementById('cfg_prio').value,
+      auto_trade              : document.getElementById('cfg_auto').checked,
+      require_mint_disabled   : document.getElementById('cfg_mint').checked,
+      require_freeze_disabled : document.getElementById('cfg_freeze').checked
+    }
+  };
+  const res = await api('/api/config','POST', body);
+  const msg = document.getElementById('saveMsg');
+  msg.style.color = res.success ? 'var(--green)' : 'var(--red)';
+  msg.textContent = res.success ? '✅ Config saved successfully!' : '❌ '+res.message;
+  setTimeout(()=>{ msg.textContent=''; }, 4000);
+  document.getElementById('maxTrades').textContent = body.trading.max_active_trades;
+}
+
+// ─── API Helper ──────────────────────────────────────────────
+async function api(url, method='GET', body=null) {
+  try {
+    const opts = { method, headers:{'Content-Type':'application/json'} };
+    if (body) opts.body = JSON.stringify(body);
+    const res  = await fetch(url, opts);
+    return await res.json();
+  } catch(e) { return { success:false, message:e.message }; }
+}
+
+// ─── Tab Nav ─────────────────────────────────────────────────
+function showTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('page-'+name).classList.add('active');
+}
+
+// ─── Notification ────────────────────────────────────────────
+let notifTimer;
+function notify(msg, type='') {
+  const el = document.getElementById('notif');
+  el.textContent = msg;
+  el.className   = 'notif show '+type;
+  clearTimeout(notifTimer);
+  notifTimer = setTimeout(()=>{ el.className='notif'; }, 5000);
+}
+
+// ─── Poll status every 30s ───────────────────────────────────
+setInterval(async ()=>{
+  const s = await api('/api/status');
+  if (s) {
+    updateBalance(s.walletBalance||0);
+    updateStats({ totalProfit: s.totalProfit, tradeCount: s.totalTrades });
+  }
+}, 30000);
+
+// ─── Init ────────────────────────────────────────────────────
+loadConfig();
+</script>
+</body>
+</html>
