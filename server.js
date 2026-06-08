@@ -6,7 +6,7 @@
 'use strict';
 
 const express     = require('express');
-const http        = require('http');
+const http        = require('http');h
 const { Server }  = require('socket.io');
 const cors        = require('cors');
 const fs          = require('fs');
@@ -25,7 +25,7 @@ const SOL_MINT     = 'So11111111111111111111111111111111111111112';
 const JUPITER_QUOTE = 'https://quote-api.jup.ag/v6/quote';
 const JUPITER_SWAP  = 'https://quote-api.jup.ag/v6/swap';
 const JUPITER_PRICE = 'https://price.jup.ag/v4/price';
-const PUMP_API      = 'https://pump.fun/api/coins';
+const PUMP_API      = 'https://frontend-api.pump.fun/coins';
 
 // ─── State ───────────────────────────────────────────────────
 let config       = loadConfig();
