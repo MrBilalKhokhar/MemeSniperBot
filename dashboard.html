@@ -154,6 +154,7 @@
   <div class="tab" onclick="showTab('ai',this)">🧠 AI Feed</div>
   <div class="tab" onclick="showTab('log',this)">🖥 Bot Log</div>
   <div class="tab" onclick="showTab('config',this)">⚙️ Config</div>
+  <div class="tab" onclick="showTab('analytics',this);loadAnalytics()">📈 Analytics</div>
 </div>
 
 <!-- ═══ DASHBOARD ═══ -->
@@ -440,6 +441,64 @@
       <div class="save-msg" id="saveMsg"></div>
     </div>
   </div>
+</div>
+
+<!-- ═══ ANALYTICS ═══ -->
+<div class="page" id="page-analytics">
+
+  <div class="stats-row" id="anlSummary" style="margin-bottom:20px">
+    <div class="stat-card"><div class="stat-label">Total Trades</div><div class="stat-val" id="anlTotal">—</div></div>
+    <div class="stat-card"><div class="stat-label">Win Rate</div><div class="stat-val pos" id="anlWinRate">—</div></div>
+    <div class="stat-card"><div class="stat-label">Total P&L (SOL)</div><div class="stat-val" id="anlPnl">—</div></div>
+    <div class="stat-card"><div class="stat-label">Avg P&L / Trade</div><div class="stat-val" id="anlAvg">—</div></div>
+    <div class="stat-card"><div class="stat-label">Total Invested</div><div class="stat-val" id="anlInvested">—</div></div>
+    <div class="stat-card"><div class="stat-label">Fees Paid</div><div class="stat-val neg" id="anlFees">—</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div class="card">
+      <div class="card-hd"><span class="card-title">🏆 Best vs Worst Trade</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px 0">
+        <div style="text-align:center;padding:16px;background:rgba(0,230,118,0.08);border-radius:10px;border:1px solid rgba(0,230,118,0.2)">
+          <div style="font-size:11px;color:var(--sub);margin-bottom:4px">BEST TRADE</div>
+          <div style="font-size:18px;font-weight:700;color:var(--green)" id="anlBestSym">—</div>
+          <div style="font-size:22px;font-weight:800;color:var(--green)" id="anlBestPnl">—</div>
+          <div style="font-size:12px;color:var(--sub)" id="anlBestPct">—</div>
+        </div>
+        <div style="text-align:center;padding:16px;background:rgba(255,82,82,0.08);border-radius:10px;border:1px solid rgba(255,82,82,0.2)">
+          <div style="font-size:11px;color:var(--sub);margin-bottom:4px">WORST TRADE</div>
+          <div style="font-size:18px;font-weight:700;color:var(--red)" id="anlWorstSym">—</div>
+          <div style="font-size:22px;font-weight:800;color:var(--red)" id="anlWorstPnl">—</div>
+          <div style="font-size:12px;color:var(--sub)" id="anlWorstPct">—</div>
+        </div>
+      </div>
+      <div style="text-align:center;padding:8px 0;font-size:12px;color:var(--sub)">
+        Wins: <span style="color:var(--green)" id="anlWins">0</span> &nbsp;|&nbsp; Losses: <span style="color:var(--red)" id="anlLosses">0</span> &nbsp;|&nbsp; Avg AI Confidence: <span id="anlConf">0</span>%
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-title">🎯 How Trades Closed</span></div>
+      <div style="padding:12px 0" id="anlReasons"><div style="text-align:center;color:var(--sub);padding:24px">No trade data yet</div></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+    <div class="card">
+      <div class="card-hd"><span class="card-title">🧠 AI Confidence Split</span></div>
+      <div style="padding:16px 0" id="anlConfBuckets"><div style="text-align:center;color:var(--sub);padding:24px">No data yet</div></div>
+    </div>
+    <div class="card">
+      <div class="card-hd"><span class="card-title">📅 Daily P&L (last 14 days)</span></div>
+      <div style="padding:8px 0;overflow-x:auto" id="anlDaily"><div style="text-align:center;color:var(--sub);padding:24px">No data yet</div></div>
+    </div>
+  </div>
+
+  <div class="card" id="anlVerdict" style="text-align:center;padding:28px">
+    <div style="font-size:36px" id="anlVerdictEmoji">⏳</div>
+    <div style="font-size:20px;font-weight:700;margin:8px 0" id="anlVerdictTitle">Waiting for trade data…</div>
+    <div style="font-size:13px;color:var(--sub)" id="anlVerdictMsg">Complete some trades and come back here to see how the bot is performing.</div>
+  </div>
+
 </div>
 
 </div><!-- /main -->
@@ -761,6 +820,69 @@ setInterval(async ()=>{
     updateStats({ totalProfit: s.totalProfit, tradeCount: s.totalTrades });
   }
 }, 30000);
+
+// ─── Analytics ───────────────────────────────────────────────
+async function loadAnalytics() {
+  const d = await api('/api/analytics');
+  if (!d || d.message) return;
+  const pnlEl = document.getElementById('anlPnl');
+  const avgEl = document.getElementById('anlAvg');
+  pnlEl.textContent = (d.totalProfitSol >= 0 ? '+' : '') + d.totalProfitSol.toFixed(6) + ' SOL';
+  pnlEl.className   = 'stat-val ' + (d.totalProfitSol >= 0 ? 'pos' : 'neg');
+  avgEl.textContent = (d.avgProfitSol >= 0 ? '+' : '') + d.avgProfitSol.toFixed(6) + ' SOL';
+  avgEl.className   = 'stat-val ' + (d.avgProfitSol >= 0 ? 'pos' : 'neg');
+  document.getElementById('anlTotal').textContent    = d.total;
+  document.getElementById('anlWinRate').textContent  = d.winRate + '%';
+  document.getElementById('anlInvested').textContent = d.totalInvested.toFixed(4) + ' SOL';
+  document.getElementById('anlFees').textContent     = d.totalFeesSol.toFixed(6) + ' SOL';
+  document.getElementById('anlWins').textContent     = d.wins;
+  document.getElementById('anlLosses').textContent   = d.losses;
+  document.getElementById('anlConf').textContent     = d.avgConfidence;
+  if (d.bestTrade) {
+    document.getElementById('anlBestSym').textContent = d.bestTrade.symbol || '—';
+    document.getElementById('anlBestPnl').textContent = '+' + (d.bestTrade.pnlSol || 0).toFixed(4) + ' SOL';
+    document.getElementById('anlBestPct').textContent = '+' + (d.bestTrade.pnlPct || 0).toFixed(1) + '%';
+  }
+  if (d.worstTrade) {
+    document.getElementById('anlWorstSym').textContent = d.worstTrade.symbol || '—';
+    document.getElementById('anlWorstPnl').textContent = (d.worstTrade.pnlSol || 0).toFixed(4) + ' SOL';
+    document.getElementById('anlWorstPct').textContent = (d.worstTrade.pnlPct || 0).toFixed(1) + '%';
+  }
+  const reasonLabels = { take_profit:'🎯 Take Profit', stop_loss:'🛑 Stop Loss', time_stop:'⏰ Time Stop', manual:'👆 Manual', other:'❓ Other' };
+  const reasonColors = { take_profit:'var(--green)', stop_loss:'var(--red)', time_stop:'var(--yellow)', manual:'var(--accent)', other:'var(--sub)' };
+  const totalReasons = Object.values(d.closeReasons).reduce((a, b) => a + b, 0);
+  const reasonsDiv = document.getElementById('anlReasons');
+  reasonsDiv.innerHTML = totalReasons === 0
+    ? '<div style="text-align:center;color:var(--sub);padding:24px">No trade data yet</div>'
+    : Object.entries(d.closeReasons).map(([k, v]) => {
+        if (!v) return '';
+        const pct = Math.round(v / totalReasons * 100);
+        return '<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>' + (reasonLabels[k]||k) + '</span><span style="color:' + (reasonColors[k]||'var(--sub)') + '">' + v + ' (' + pct + '%)</span></div><div style="background:var(--border);border-radius:4px;height:8px"><div style="width:' + pct + '%;background:' + (reasonColors[k]||'var(--accent)') + ';height:8px;border-radius:4px"></div></div></div>';
+      }).join('');
+  const totalConf = d.confBuckets.high + d.confBuckets.med + d.confBuckets.low;
+  const confDiv   = document.getElementById('anlConfBuckets');
+  confDiv.innerHTML = totalConf === 0
+    ? '<div style="text-align:center;color:var(--sub);padding:24px">No data yet</div>'
+    : [['High (≥70%)',d.confBuckets.high,'var(--green)'],['Med (50-69%)',d.confBuckets.med,'var(--yellow)'],['Low (<50%)',d.confBuckets.low,'var(--red)']].map(([label,val,color]) => {
+        const pct = Math.round(val/totalConf*100);
+        return '<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>'+label+'</span><span style="color:'+color+'">'+val+' ('+pct+'%)</span></div><div style="background:var(--border);border-radius:4px;height:8px"><div style="width:'+pct+'%;background:'+color+';height:8px;border-radius:4px"></div></div></div>';
+      }).join('');
+  const dailyDiv = document.getElementById('anlDaily');
+  if (!d.dailyPnl||!d.dailyPnl.length) {
+    dailyDiv.innerHTML = '<div style="text-align:center;color:var(--sub);padding:24px">No data yet</div>';
+  } else {
+    const maxAbs = Math.max(...d.dailyPnl.map(r=>Math.abs(r.pnl)),0.0001);
+    dailyDiv.innerHTML = '<table style="width:100%;font-size:12px;border-collapse:collapse"><thead><tr style="color:var(--sub)"><th style="text-align:left;padding:4px 6px">Date</th><th>Trades</th><th>Wins</th><th style="text-align:right">P&L (SOL)</th><th style="width:40%">Chart</th></tr></thead><tbody>' + d.dailyPnl.map(r=>{const cls=r.pnl>=0?'pos':'neg';const barW=Math.round(Math.abs(r.pnl)/maxAbs*100);const barC=r.pnl>=0?'var(--green)':'var(--red)';return '<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 6px">'+r.date+'</td><td style="text-align:center">'+r.trades+'</td><td style="text-align:center;color:var(--green)">'+r.wins+'</td><td class="'+cls+'" style="text-align:right;font-family:monospace">'+(r.pnl>=0?'+':'')+r.pnl.toFixed(4)+'</td><td><div style="background:var(--border);border-radius:3px;height:10px"><div style="width:'+barW+'%;background:'+barC+';height:10px;border-radius:3px"></div></div></td></tr>';}).join('')+'</tbody></table>';
+  }
+  const emojiEl=document.getElementById('anlVerdictEmoji');
+  const titleEl=document.getElementById('anlVerdictTitle');
+  const msgEl=document.getElementById('anlVerdictMsg');
+  const verdictDiv=document.getElementById('anlVerdict');
+  if(d.total===0){emojiEl.textContent='⏳';titleEl.textContent='No trades yet';msgEl.textContent='Start the bot and let it run to see performance here.';verdictDiv.style.borderTop='3px solid var(--border)';}
+  else if(d.winRate>=60&&d.totalProfitSol>0){emojiEl.textContent='🚀';titleEl.textContent='Bot is performing WELL — '+d.winRate+'% win rate';msgEl.textContent=d.wins+' wins out of '+d.total+' trades, netting +'+d.totalProfitSol.toFixed(4)+' SOL. Keep it running!';verdictDiv.style.borderTop='3px solid var(--green)';}
+  else if(d.winRate>=40&&d.totalProfitSol>=0){emojiEl.textContent='⚖️';titleEl.textContent='Bot is BREAK-EVEN — '+d.winRate+'% win rate';msgEl.textContent='Mixed results: '+d.wins+'W / '+d.losses+'L. Try tightening AI confidence or stop loss in Config.';verdictDiv.style.borderTop='3px solid var(--yellow)';}
+  else{emojiEl.textContent='⚠️';titleEl.textContent='Bot needs tuning — '+d.winRate+'% win rate';msgEl.textContent=d.losses+' losses vs '+d.wins+' wins. Raise AI Confidence Min% or lower Stop Loss% in Config.';verdictDiv.style.borderTop='3px solid var(--red)';}
+}
 
 // ─── Init ────────────────────────────────────────────────────
 loadConfig();
