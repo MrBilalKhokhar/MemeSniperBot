@@ -439,6 +439,21 @@
 
       <button class="btn-save" onclick="saveConfig()">💾 Save Config</button>
       <div class="save-msg" id="saveMsg"></div>
+
+      <div style="margin-top:28px;background:rgba(108,99,255,0.08);border:1px solid rgba(108,99,255,0.25);border-radius:12px;padding:20px 24px;">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--accent);margin-bottom:8px;">📝 Paper Trading</div>
+        <div style="font-size:12px;color:var(--sub);margin-bottom:14px;line-height:1.6">
+          When <b style="color:var(--text)">Auto-Trade is OFF</b>, the bot simulates trades using real AI decisions — no real SOL spent.<br/>
+          Use the buttons below to test results instantly.
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button class="btn btn-outline" onclick="runPaperTest()" style="border-color:var(--accent);color:var(--accent)">🎲 Simulate a Trade Now</button>
+          <button class="btn btn-outline" onclick="clearPaperTrades()" style="border-color:var(--red);color:var(--red)">🗑 Clear All Paper Trades</button>
+        </div>
+        <div style="margin-top:10px;font-size:12px;color:var(--sub)" id="paperTestMsg"></div>
+        <div style="margin-top:10px;font-size:11px;color:var(--sub)">⚠️ Min Market Cap is now $1,000 and AI threshold 60% so real tokens pass the filters.</div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -616,25 +631,16 @@ function renderHistory(arr) {
   updateWinRate();
   const tbody = document.getElementById('historyTable');
   if (!arr.length) { tbody.innerHTML='<tr><td colspan="11" class="empty">No trade history yet</td></tr>'; return; }
+  const reasonChip = { take_profit:'🎯 TP', stop_loss:'🛑 SL', time_stop:'⏰ Time', manual:'👆 Manual', paper_trade:'📝 SIM' };
   tbody.innerHTML = arr.slice(0,100).map(t => {
-    const pnlCls = t.pnlSol>=0 ? 'pos' : 'neg';
-    const dur    = t.sellTime ? Math.round((t.sellTime-t.buyTime)/60000)+'m' : '-';
-    const reasonChip = { take_profit:'🎯 TP', stop_loss:'🛑 SL', time_stop:'⏰ Time', manual:'👆 Manual' };
-    const chip   = t.status==='profit' ? 'chip-profit' : 'chip-loss';
-    const totalFees = (t.feesPaidSol||0)*2; // rough buy+sell fees
-    return `<tr>
-      <td><b>${t.symbol}</b></td>
-      <td>${t.buySol} SOL</td>
-      <td>${t.pnlSol>=0 ? (parseFloat(t.buySol)+t.pnlSol+totalFees).toFixed(6) : '—'} SOL</td>
-      <td class="neg">${(t.feesPaidSol||0).toFixed(6)}</td>
-      <td class="neg">~${(t.feesPaidSol||0).toFixed(6)}</td>
-      <td class="${pnlCls}">${t.pnlSol>=0?'+':''}${(t.pnlSol||0).toFixed(6)}</td>
-      <td class="${pnlCls}">${(t.pnlPct||0).toFixed(1)}%</td>
-      <td><span class="chip ${chip}">${reasonChip[t.closeReason]||t.closeReason||'?'}</span></td>
-      <td>${dur}</td>
-      <td>${t.aiConfidence||0}%</td>
-      <td>${t.sellTxId ? `<a href="https://solscan.io/tx/${t.sellTxId}" target="_blank" style="color:var(--accent);font-size:10px;font-family:monospace">${t.sellTxId.slice(0,8)}...</a>` : '-'}</td>
-    </tr>`;
+    const isPaper = t.status === 'paper';
+    const pnlCls  = (t.pnlSol||0) >= 0 ? 'pos' : 'neg';
+    const dur     = t.sellTime ? Math.round((t.sellTime-t.buyTime)/60000)+'m' : '-';
+    const chip    = isPaper ? 'chip-buy' : ((t.pnlSol||0)>=0 ? 'chip-profit' : 'chip-loss');
+    const totalFees = (t.feesPaidSol||0)*2;
+    const pb = isPaper ? '<span style="font-size:9px;background:rgba(108,99,255,0.2);color:var(--accent);padding:1px 5px;border-radius:4px;margin-left:4px">SIM</span>' : '';
+    const txCell = t.sellTxId ? '<a href="https://solscan.io/tx/'+t.sellTxId+'" target="_blank" style="color:var(--accent);font-size:10px">'+t.sellTxId.slice(0,8)+'...</a>' : (isPaper ? '<span style="color:var(--sub);font-size:10px">simulated</span>' : '-');
+    return '<tr style="'+(isPaper?'opacity:0.85;':'')+'"><td><b>'+t.symbol+'</b>'+pb+'</td><td>'+t.buySol+' SOL</td><td>'+((t.pnlSol||0)>=0?(parseFloat(t.buySol)+(t.pnlSol||0)+totalFees).toFixed(6):'—')+' SOL</td><td class="neg">'+(t.feesPaidSol||0).toFixed(6)+'</td><td class="neg">'+(isPaper?'—':'~'+(t.feesPaidSol||0).toFixed(6))+'</td><td class="'+pnlCls+'">'+(((t.pnlSol||0)>=0?'+':'')+(t.pnlSol||0).toFixed(6))+'</td><td class="'+pnlCls+'">'+(t.pnlPct||0).toFixed(1)+'%</td><td><span class="chip '+chip+'">'+(reasonChip[t.closeReason]||t.closeReason||'?')+'</span></td><td>'+dur+'</td><td>'+(t.aiConfidence||0)+'%</td><td>'+txCell+'</td></tr>';
   }).join('');
 }
 
@@ -642,20 +648,13 @@ function renderRecentDash(arr) {
   const tbody = document.getElementById('recentTradesTable');
   const slice = arr.slice(0,8);
   if (!slice.length) { tbody.innerHTML='<tr><td colspan="8" class="empty">No closed trades yet</td></tr>'; return; }
-  const reasonChip = { take_profit:'🎯 TP', stop_loss:'🛑 SL', time_stop:'⏰ Time', manual:'👆 Manual' };
+  const reasonChip = { take_profit:'🎯 TP', stop_loss:'🛑 SL', time_stop:'⏰ Time', manual:'👆 Manual', paper_trade:'📝 SIM' };
   tbody.innerHTML = slice.map(t => {
-    const pnlCls = t.pnlSol>=0 ? 'pos' : 'neg';
+    const isPaper = t.status === 'paper';
+    const pnlCls  = (t.pnlSol||0) >= 0 ? 'pos' : 'neg';
     const totalFees = (t.feesPaidSol||0)*2;
-    return `<tr>
-      <td><b>${t.symbol}</b></td>
-      <td>${t.buySol} SOL</td>
-      <td>${t.pnlSol>=0 ? (parseFloat(t.buySol)+t.pnlSol+totalFees).toFixed(4) : '—'} SOL</td>
-      <td class="neg">~${((t.feesPaidSol||0)*2).toFixed(6)} SOL</td>
-      <td class="${pnlCls}">${t.pnlSol>=0?'+':''}${(t.pnlSol||0).toFixed(6)} SOL</td>
-      <td class="${pnlCls}">${(t.pnlPct||0).toFixed(1)}%</td>
-      <td>${reasonChip[t.closeReason]||t.closeReason||'?'}</td>
-      <td style="font-size:10px;color:var(--sub)">${t.sellTime ? new Date(t.sellTime).toLocaleTimeString() : '-'}</td>
-    </tr>`;
+    const pb = isPaper ? '<span style="font-size:9px;background:rgba(108,99,255,0.2);color:var(--accent);padding:1px 5px;border-radius:4px;margin-left:4px">SIM</span>' : '';
+    return '<tr><td><b>'+t.symbol+'</b>'+pb+'</td><td>'+t.buySol+' SOL</td><td>'+((t.pnlSol||0)>=0?(parseFloat(t.buySol)+(t.pnlSol||0)+totalFees).toFixed(4):'—')+' SOL</td><td class="neg">~'+((t.feesPaidSol||0)*2).toFixed(6)+' SOL</td><td class="'+pnlCls+'">'+(((t.pnlSol||0)>=0?'+':'')+(t.pnlSol||0).toFixed(6))+' SOL</td><td class="'+pnlCls+'">'+(t.pnlPct||0).toFixed(1)+'%</td><td>'+(reasonChip[t.closeReason]||t.closeReason||'?')+'</td><td style="font-size:10px;color:var(--sub)">'+(t.sellTime?new Date(t.sellTime).toLocaleTimeString():'-')+'</td></tr>';
   }).join('');
 }
 
@@ -784,6 +783,32 @@ async function saveConfig() {
   document.getElementById('maxTrades').textContent = body.trading.max_active_trades;
 }
 
+// ─── Paper Trade Test ────────────────────────────────────────
+async function runPaperTest() {
+  const msg = document.getElementById('paperTestMsg');
+  msg.style.color = 'var(--sub)';
+  msg.textContent = '⏳ Simulating trade...';
+  const res = await api('/api/paper-trade/test', 'POST');
+  if (res.success) {
+    const t = res.trade;
+    const won = t.pnlSol >= 0;
+    msg.style.color = won ? 'var(--green)' : 'var(--red)';
+    msg.textContent = (won?'✅ WIN':'❌ LOSS')+': '+t.symbol+' '+(won?'+':'')+t.pnlPct.toFixed(1)+'% ('+(won?'+':'')+t.pnlSol.toFixed(6)+' SOL) — AI: '+t.aiConfidence+'%';
+  } else {
+    msg.style.color = 'var(--red)'; msg.textContent = '❌ '+(res.message||'Failed');
+  }
+}
+async function clearPaperTrades() {
+  if (!confirm('Clear all simulated paper trades?')) return;
+  const msg = document.getElementById('paperTestMsg');
+  const res = await api('/api/paper-trade/clear', 'POST');
+  if (res.success) {
+    allTrades = allTrades.filter(t => t.status !== 'paper');
+    renderHistory(allTrades); renderRecentDash(allTrades);
+    msg.style.color = 'var(--green)'; msg.textContent = '✅ Cleared '+res.cleared+' paper trade(s)';
+  } else { msg.style.color = 'var(--red)'; msg.textContent = '❌ '+(res.message||'Failed'); }
+}
+
 // ─── API Helper ──────────────────────────────────────────────
 async function api(url, method='GET', body=null) {
   try {
@@ -851,8 +876,8 @@ async function loadAnalytics() {
     document.getElementById('anlWorstPnl').textContent = (d.worstTrade.pnlSol || 0).toFixed(4) + ' SOL';
     document.getElementById('anlWorstPct').textContent = (d.worstTrade.pnlPct || 0).toFixed(1) + '%';
   }
-  const reasonLabels = { take_profit:'🎯 Take Profit', stop_loss:'🛑 Stop Loss', time_stop:'⏰ Time Stop', manual:'👆 Manual', other:'❓ Other' };
-  const reasonColors = { take_profit:'var(--green)', stop_loss:'var(--red)', time_stop:'var(--yellow)', manual:'var(--accent)', other:'var(--sub)' };
+  const reasonLabels = { take_profit:'🎯 Take Profit', stop_loss:'🛑 Stop Loss', time_stop:'⏰ Time Stop', manual:'👆 Manual', paper_trade:'📝 Paper / Simulated', other:'❓ Other' };
+  const reasonColors = { take_profit:'var(--green)', stop_loss:'var(--red)', time_stop:'var(--yellow)', manual:'var(--accent)', paper_trade:'var(--accent)', other:'var(--sub)' };
   const totalReasons = Object.values(d.closeReasons).reduce((a, b) => a + b, 0);
   const reasonsDiv = document.getElementById('anlReasons');
   reasonsDiv.innerHTML = totalReasons === 0
