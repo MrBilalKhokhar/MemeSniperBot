@@ -12,6 +12,7 @@ const cors        = require('cors');
 const fs          = require('fs');
 const path        = require('path');
 const fetch       = require('node-fetch');
+const WebSocket   = require('ws');
 const {
   Connection, Keypair, PublicKey,
   VersionedTransaction, LAMPORTS_PER_SOL
@@ -30,9 +31,10 @@ const PUMP_API      = 'https://frontend-api.pump.fun/coins';
 // ─── State ───────────────────────────────────────────────────
 let config       = loadConfig();
 let trades       = loadTrades();
-let botRunning   = false;
-let monitorTimer = null;
-let positionTimer= null;
+let botRunning      = false;
+let pumpWs          = null;
+let wsReconnectTimer= null;
+let positionTimer   = null;
 let activeTrades = {};    // mint → trade object
 let tokensSeen   = new Set(); // pruned when > 500 entries
 let aiQueue      = [];    // tokens waiting for AI analysis
@@ -279,81 +281,88 @@ async function startBot() {
   log('🤖 Bot STARTED — Sniper active on pump.fun');
   await refreshBalance();
 
-  monitorTimer = setInterval(monitorNewTokens,  config.monitoring.new_token_check_interval_ms);
+  connectPumpPortal();
   positionTimer= setInterval(checkPositions,    config.monitoring.position_check_interval_ms);
   setInterval(refreshBalance, 30000);
 
-  io.emit('botStatus', { running: true });
+  io.emit('botStatus', { running: true, walletAddress: config.solana.wallet_address || '' });
 }
 
 function stopBot() {
   botRunning = false;
-  clearInterval(monitorTimer);
+  disconnectPumpPortal();
   clearInterval(positionTimer);
   log('🛑 Bot STOPPED');
   io.emit('botStatus', { running: false });
 }
 
-// ─── Pump.fun Monitor ────────────────────────────────────────
-let _monitorTick = 0;
-async function monitorNewTokens() {
+// ─── PumpPortal WebSocket Monitor ────────────────────
+// Real-time new token stream — avoids Cloudflare blocks on pump.fun REST API
+
+function normalizeToken(raw) {
+  const marketCapSol = raw.marketCapSol || 0;
+  const solPriceUSD  = 150;
+  return {
+    ...raw,
+    usd_market_cap      : raw.usd_market_cap       || (marketCapSol * solPriceUSD),
+    virtual_sol_reserves: raw.virtual_sol_reserves  || ((raw.vSolInBondingCurve || 0) * LAMPORTS_PER_SOL),
+    created_timestamp   : raw.created_timestamp     || (Date.now() / 1000),
+    description         : raw.description           || raw.name || '',
+    reply_count         : raw.reply_count           || 0,
+    king_of_the_hill_timestamp: raw.king_of_the_hill_timestamp || null
+  };
+}
+
+function connectPumpPortal() {
   if (!botRunning) return;
+  clearTimeout(wsReconnectTimer);
+  log('📡 Connecting to PumpPortal WebSocket...');
   try {
-    const limit = config.monitoring.pump_fun_limit || 20;
-    const url   = `${PUMP_API}?offset=0&limit=${limit}&sort=created_timestamp&order=DESC&includeNsfw=true`;
-    const res   = await fetch(url, {
-      timeout : 10000,
-      headers : {
-        'Accept'     : 'application/json',
-        'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-        'Origin'     : 'https://pump.fun',
-        'Referer'    : 'https://pump.fun/'
-      }
-    });
-    if (!res.ok) { log(`⚠️  pump.fun API returned ${res.status} — will retry`); return; }
-    const text = await res.text();
-    if (text.trim().startsWith('<')) { log('⚠️  pump.fun returned HTML — API down, retrying...'); return; }
-
-    const raw    = JSON.parse(text);
-    const tokens = Array.isArray(raw) ? raw : (raw.coins || raw.data || []);
-    _monitorTick++;
-
-    if (_monitorTick % 10 === 1) {
-      log(`📡 Monitor tick #${_monitorTick}: ${tokens.length} tokens from pump.fun | seen cache: ${tokensSeen.size}`);
-    }
-    if (tokens.length === 0) { log('📡 pump.fun returned 0 tokens'); return; }
-
-    const now    = Date.now() / 1000;
-    const maxAge = Math.max(config.trading.max_token_age_seconds || 1800, 1800);
-
-    // Prune tokensSeen to avoid infinite memory growth
-    if (tokensSeen.size > 500) {
-      const arr = [...tokensSeen];
-      tokensSeen = new Set(arr.slice(arr.length - 300));
-    }
-
-    let skippedSeen = 0, skippedAge = 0, queued = 0;
-    for (const token of tokens) {
-      const mint = token.mint;
-      const ts   = token.created_timestamp || now;
-      // Normalise: pump.fun sometimes returns ms, sometimes seconds
-      const age  = ts > 1e12 ? (now - ts / 1000) : (now - ts);
-
-      if (tokensSeen.has(mint)) { skippedSeen++; continue; }
-      if (age > maxAge)          { skippedAge++;  continue; }
-
-      tokensSeen.add(mint);
-      queued++;
-      log(`🔍 New token: ${token.symbol || mint.slice(0,8)} — age ${Math.round(age)}s | MC $${(token.usd_market_cap||0).toFixed(0)}`);
-      analyzeToken(token).catch(e => log(`⚠️  Analysis error: ${e.message}`));
-    }
-
-    if (queued === 0 && _monitorTick % 10 === 1) {
-      log(`⏭️  All ${tokens.length} skipped: ${skippedSeen} seen, ${skippedAge} too old (>${maxAge}s)`);
-    }
+    pumpWs = new WebSocket('wss://pumpportal.fun/api/data');
   } catch (e) {
-    log(`⚠️  Monitor error: ${e.message}`);
+    log(`❌ WebSocket init error: ${e.message}`);
+    if (botRunning) wsReconnectTimer = setTimeout(connectPumpPortal, 10000);
+    return;
   }
+
+  pumpWs.on('open', () => {
+    log('✅ PumpPortal connected — real-time token stream active');
+    pumpWs.send(JSON.stringify({ method: 'subscribeNewToken' }));
+  });
+
+  pumpWs.on('message', (data) => {
+    if (!botRunning) return;
+    try {
+      const raw = JSON.parse(data.toString());
+      if (!raw.mint) return;
+      if (raw.txType && raw.txType !== 'create') return;
+      if (tokensSeen.has(raw.mint)) return;
+      if (tokensSeen.size > 500) {
+        const arr  = [...tokensSeen];
+        tokensSeen = new Set(arr.slice(arr.length - 300));
+      }
+      tokensSeen.add(raw.mint);
+      const token = normalizeToken(raw);
+      const mcUsd = token.usd_market_cap || 0;
+      const liqSol = (raw.vSolInBondingCurve || 0);
+      log(`🔍 New token: ${token.symbol || raw.mint.slice(0,8)} | MC $${mcUsd.toFixed(0)} | Liq ${liqSol.toFixed(2)} SOL`);
+      analyzeToken(token).catch(e => log(`⚠️  Analysis error: ${e.message}`));
+    } catch (e) { /* ignore malformed messages */ }
+  });
+
+  pumpWs.on('close', (code) => {
+    log(`⚠️  PumpPortal disconnected (code ${code}) — reconnecting in 5s...`);
+    if (botRunning) wsReconnectTimer = setTimeout(connectPumpPortal, 5000);
+  });
+
+  pumpWs.on('error', (e) => {
+    log(`⚠️  PumpPortal WS error: ${e.message}`);
+  });
+}
+
+function disconnectPumpPortal() {
+  clearTimeout(wsReconnectTimer);
+  if (pumpWs) { try { pumpWs.close(); } catch {} pumpWs = null; }
 }
 
 // ─── Token Analysis ──────────────────────────────────────────
