@@ -736,7 +736,7 @@ function finalizeTrade(mint, pnlSol, pnlPct, reason, sellTxId) {
 io.on('connection', (socket) => {
   log(`📊 Dashboard connected`);
   // Push current state immediately
-  socket.emit('botStatus',  { running: botRunning });
+  socket.emit('botStatus',  { running: botRunning, walletAddress: config.solana.wallet_address || '' });
   socket.emit('balance',    walletBalance);
   socket.emit('statsUpdate',{ totalProfit, tradeCount: trades.length });
   socket.emit('activeTrades', Object.values(activeTrades));
