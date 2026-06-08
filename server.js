@@ -140,6 +140,62 @@ app.post('/api/sell/:mint', async (req, res) => {
   }
 });
 
+app.get('/api/analytics', (req, res) => {
+  const closed = trades;
+  const total  = closed.length;
+  const wins   = closed.filter(t => (t.pnlSol || 0) > 0);
+  const losses = closed.filter(t => (t.pnlSol || 0) <= 0);
+  const totalProfitSol = closed.reduce((s, t) => s + (t.pnlSol || 0), 0);
+  const totalFeesSol   = closed.reduce((s, t) => s + (t.feesPaidSol || 0) * 2, 0);
+  const totalInvested  = closed.reduce((s, t) => s + parseFloat(t.buySol || 0), 0);
+  const avgProfitSol   = total ? totalProfitSol / total : 0;
+  const winRate        = total ? Math.round(wins.length / total * 100) : 0;
+
+  const sorted     = [...closed].sort((a, b) => (b.pnlSol || 0) - (a.pnlSol || 0));
+  const bestTrade  = sorted[0]  || null;
+  const worstTrade = sorted[sorted.length - 1] || null;
+
+  const closeReasons = { take_profit: 0, stop_loss: 0, time_stop: 0, manual: 0, other: 0 };
+  closed.forEach(t => {
+    if (closeReasons[t.closeReason] !== undefined) closeReasons[t.closeReason]++;
+    else closeReasons.other++;
+  });
+
+  const avgConfidence = total
+    ? Math.round(closed.reduce((s, t) => s + (t.aiConfidence || 0), 0) / total)
+    : 0;
+
+  const dayMap = {};
+  closed.forEach(t => {
+    if (!t.sellTime) return;
+    const d = new Date(t.sellTime).toISOString().slice(0, 10);
+    if (!dayMap[d]) dayMap[d] = { date: d, pnl: 0, trades: 0, wins: 0 };
+    dayMap[d].pnl    += (t.pnlSol || 0);
+    dayMap[d].trades += 1;
+    if ((t.pnlSol || 0) > 0) dayMap[d].wins++;
+  });
+  const dailyPnl = Object.values(dayMap)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-14);
+
+  const confBuckets = { high: 0, med: 0, low: 0 };
+  closed.forEach(t => {
+    const c = t.aiConfidence || 0;
+    if (c >= 70) confBuckets.high++;
+    else if (c >= 50) confBuckets.med++;
+    else confBuckets.low++;
+  });
+
+  res.json({
+    total, wins: wins.length, losses: losses.length, winRate,
+    totalProfitSol, avgProfitSol, totalInvested, totalFeesSol,
+    bestTrade : bestTrade  ? { symbol: bestTrade.symbol,  pnlSol: bestTrade.pnlSol,  pnlPct: bestTrade.pnlPct,  closeReason: bestTrade.closeReason  } : null,
+    worstTrade: worstTrade ? { symbol: worstTrade.symbol, pnlSol: worstTrade.pnlSol, pnlPct: worstTrade.pnlPct, closeReason: worstTrade.closeReason } : null,
+    closeReasons, avgConfidence, dailyPnl, confBuckets,
+    activeCount: Object.keys(activeTrades).length
+  });
+});
+
 // ─── Config & Trade I/O ─────────────────────────────────────
 function loadConfig() {
   try {
