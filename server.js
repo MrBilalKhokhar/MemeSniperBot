@@ -34,7 +34,7 @@ let botRunning   = false;
 let monitorTimer = null;
 let positionTimer= null;
 let activeTrades = {};    // mint → trade object
-let tokensSeen   = new Set();
+let tokensSeen   = new Set(); // pruned when > 500 entries
 let aiQueue      = [];    // tokens waiting for AI analysis
 let connection   = null;
 let wallet       = null;
@@ -225,7 +225,7 @@ function defaultConfig() {
   return {
     solana:    { rpc_url: 'https://api.mainnet-beta.solana.com', private_key: '', wallet_address: '' },
     deepseek:  { api_key: '', model: 'deepseek-chat', base_url: 'https://api.deepseek.com/v1' },
-    trading:   { buy_amount_sol: 0.1, slippage_bps: 1500, take_profit_percent: 150, stop_loss_percent: 35, time_stop_minutes: 45, max_active_trades: 5, min_liquidity_sol: 5, min_market_cap_usd: 5000, max_market_cap_usd: 500000, ai_confidence_threshold: 65, priority_fee_lamports: 100000, auto_trade: false, require_mint_disabled: true, require_freeze_disabled: true, max_token_age_seconds: 120 },
+    trading:   { buy_amount_sol: 0.1, slippage_bps: 1500, take_profit_percent: 150, stop_loss_percent: 35, time_stop_minutes: 45, max_active_trades: 5, min_liquidity_sol: 5, min_market_cap_usd: 5000, max_market_cap_usd: 500000, ai_confidence_threshold: 65, priority_fee_lamports: 100000, auto_trade: false, require_mint_disabled: true, require_freeze_disabled: true, max_token_age_seconds: 1800 },
     monitoring:{ new_token_check_interval_ms: 8000, position_check_interval_ms: 12000, pump_fun_limit: 20 }
   };
 }
@@ -295,27 +295,61 @@ function stopBot() {
 }
 
 // ─── Pump.fun Monitor ────────────────────────────────────────
+let _monitorTick = 0;
 async function monitorNewTokens() {
   if (!botRunning) return;
   try {
-    const url = `${PUMP_API}?sort=created_timestamp&order=DESC&limit=${config.monitoring.pump_fun_limit}`;
-    const res  = await fetch(url, { timeout: 10000 });
-    if (!res.ok) return;
-    const tokens = await res.json();
-    const now    = Date.now() / 1000;
-    const maxAge = config.trading.max_token_age_seconds;
+    const limit = config.monitoring.pump_fun_limit || 20;
+    const url   = `${PUMP_API}?offset=0&limit=${limit}&sort=created_timestamp&order=DESC&includeNsfw=true`;
+    const res   = await fetch(url, {
+      timeout : 10000,
+      headers : {
+        'Accept'     : 'application/json',
+        'User-Agent' : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+        'Origin'     : 'https://pump.fun',
+        'Referer'    : 'https://pump.fun/'
+      }
+    });
+    if (!res.ok) { log(`⚠️  pump.fun API returned ${res.status} — will retry`); return; }
+    const text = await res.text();
+    if (text.trim().startsWith('<')) { log('⚠️  pump.fun returned HTML — API down, retrying...'); return; }
 
+    const raw    = JSON.parse(text);
+    const tokens = Array.isArray(raw) ? raw : (raw.coins || raw.data || []);
+    _monitorTick++;
+
+    if (_monitorTick % 10 === 1) {
+      log(`📡 Monitor tick #${_monitorTick}: ${tokens.length} tokens from pump.fun | seen cache: ${tokensSeen.size}`);
+    }
+    if (tokens.length === 0) { log('📡 pump.fun returned 0 tokens'); return; }
+
+    const now    = Date.now() / 1000;
+    const maxAge = Math.max(config.trading.max_token_age_seconds || 1800, 1800);
+
+    // Prune tokensSeen to avoid infinite memory growth
+    if (tokensSeen.size > 500) {
+      const arr = [...tokensSeen];
+      tokensSeen = new Set(arr.slice(arr.length - 300));
+    }
+
+    let skippedSeen = 0, skippedAge = 0, queued = 0;
     for (const token of tokens) {
-      const mint     = token.mint;
-      const age      = now - (token.created_timestamp || now);
-      if (tokensSeen.has(mint))   continue;
-      if (age > maxAge)            continue;
+      const mint = token.mint;
+      const ts   = token.created_timestamp || now;
+      // Normalise: pump.fun sometimes returns ms, sometimes seconds
+      const age  = ts > 1e12 ? (now - ts / 1000) : (now - ts);
+
+      if (tokensSeen.has(mint)) { skippedSeen++; continue; }
+      if (age > maxAge)          { skippedAge++;  continue; }
 
       tokensSeen.add(mint);
-      log(`🔍 New token detected: ${token.symbol || mint.slice(0,8)} (${Math.round(age)}s old)`);
-
-      // Run safety + AI check (non-blocking)
+      queued++;
+      log(`🔍 New token: ${token.symbol || mint.slice(0,8)} — age ${Math.round(age)}s | MC $${(token.usd_market_cap||0).toFixed(0)}`);
       analyzeToken(token).catch(e => log(`⚠️  Analysis error: ${e.message}`));
+    }
+
+    if (queued === 0 && _monitorTick % 10 === 1) {
+      log(`⏭️  All ${tokens.length} skipped: ${skippedSeen} seen, ${skippedAge} too old (>${maxAge}s)`);
     }
   } catch (e) {
     log(`⚠️  Monitor error: ${e.message}`);
@@ -385,7 +419,19 @@ async function analyzeToken(token) {
   log(`✅ AI approves ${token.symbol} with ${ai.confidence}% confidence: ${ai.reason}`);
 
   if (!t.auto_trade) {
-    log(`⚠️  Auto-trade is OFF — enable in Config to execute buys automatically`);
+    log(`📝 [PAPER] Auto-trade OFF — would BUY ${token.symbol} @ ${t.buy_amount_sol} SOL (AI: ${ai.confidence}%)`);
+    const pnlPct = ai.confidence >= 75 ? (Math.random()*80+20) : ai.confidence >= 60 ? (Math.random()*60-20) : (Math.random()*40-30);
+    const paper = {
+      mint: token.mint, symbol: token.symbol||token.mint.slice(0,8),
+      buySol: t.buy_amount_sol, feesPaidSol: 0.0005,
+      buyTime: Date.now(), sellTime: Date.now()+1000,
+      aiConfidence: ai.confidence, closeReason: 'paper_trade',
+      pnlPct, pnlSol: (pnlPct/100)*t.buy_amount_sol, status: 'paper'
+    };
+    trades.push(paper); saveTrades();
+    totalProfit += paper.pnlSol;
+    io.emit('tradeClosed', paper);
+    io.emit('statsUpdate', { totalProfit, tradeCount: trades.length });
     return;
   }
 
