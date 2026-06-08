@@ -517,7 +517,7 @@ let allAI     = [];
 fetch('https://price.jup.ag/v4/price?ids=So11111111111111111111111111111111111111112')
   .then(r=>r.json()).then(d=>{ solPrice = d?.data?.['So11111111111111111111111111111111111111112']?.price || 150; }).catch(()=>{});
 
-socket.on('botStatus',  d => setBotStatus(d.running));
+socket.on('botStatus',  d => { setBotStatus(d.running); if (d.walletAddress) { document.getElementById('walletAddr').textContent = d.walletAddress; } });
 socket.on('balance',    b => updateBalance(b));
 socket.on('statsUpdate',d => updateStats(d));
 socket.on('activeTrades', arr => { allActive={}; arr.forEach(t=>{ allActive[t.mint]=t; }); renderActive(); });
@@ -813,13 +813,16 @@ function notify(msg, type='') {
 }
 
 // ─── Poll status every 30s ───────────────────────────────────
-setInterval(async ()=>{
+async function refreshStatus() {
   const s = await api('/api/status');
-  if (s) {
-    updateBalance(s.walletBalance||0);
-    updateStats({ totalProfit: s.totalProfit, tradeCount: s.totalTrades });
+  if (!s) return;
+  updateBalance(s.walletBalance||0);
+  updateStats({ totalProfit: s.totalProfit, tradeCount: s.totalTrades });
+  if (s.walletAddress && s.walletAddress !== 'Not configured') {
+    document.getElementById('walletAddr').textContent = s.walletAddress;
   }
-}, 30000);
+}
+setInterval(refreshStatus, 30000);
 
 // ─── Analytics ───────────────────────────────────────────────
 async function loadAnalytics() {
@@ -886,6 +889,7 @@ async function loadAnalytics() {
 
 // ─── Init ────────────────────────────────────────────────────
 loadConfig();
+refreshStatus(); // populate wallet address immediately
 </script>
 </body>
 </html>
