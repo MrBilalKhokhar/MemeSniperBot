@@ -248,7 +248,7 @@ function defaultConfig() {
   return {
     solana:    { rpc_url: 'https://api.mainnet-beta.solana.com', private_key: '', wallet_address: '' },
     deepseek:  { api_key: '', model: 'deepseek-chat', base_url: 'https://api.deepseek.com/v1' },
-    trading:   { buy_amount_sol: 0.1, slippage_bps: 1500, take_profit_percent: 150, stop_loss_percent: 35, time_stop_minutes: 45, max_active_trades: 5, min_liquidity_sol: 5, min_market_cap_usd: 1000, max_market_cap_usd: 500000, ai_confidence_threshold: 60, priority_fee_lamports: 100000, auto_trade: false, require_mint_disabled: true, require_freeze_disabled: true, max_token_age_seconds: 1800 },
+    trading:   { buy_amount_sol: 0.1, slippage_bps: 300, take_profit_percent: 50, stop_loss_percent: 25, time_stop_minutes: 30, max_active_trades: 5, min_liquidity_sol: 5, min_market_cap_usd: 1000, max_market_cap_usd: 500000, ai_confidence_threshold: 45, priority_fee_lamports: 100000, auto_trade: false, require_mint_disabled: false, require_freeze_disabled: false, max_token_age_seconds: 1800 },
     monitoring:{ new_token_check_interval_ms: 8000, position_check_interval_ms: 12000, pump_fun_limit: 20 }
   };
 }
@@ -446,19 +446,45 @@ async function analyzeToken(token) {
     return;
   }
 
-  log(`✅ AI approves ${token.symbol} with ${ai.confidence}% confidence: ${ai.reason}`);
+  // ── Break-even gate: only enter if TP covers all fees & slippage ──
+  const slippageFrac   = (t.slippage_bps / 10000) * 2;
+  const dexFeeFrac     = 0.003 * 2;
+  const networkFeeSol  = 0.000005 * 2 + (t.priority_fee_lamports / LAMPORTS_PER_SOL) * 2;
+  const totalCostFrac  = slippageFrac + dexFeeFrac + (networkFeeSol / t.buy_amount_sol);
+  const minGainNeeded  = totalCostFrac * 100;
+  const tpPct          = t.take_profit_percent;
+
+  if (tpPct <= minGainNeeded) {
+    log(`🚫 Break-even check: TP ${tpPct}% does not cover costs ${minGainNeeded.toFixed(1)}% — adjust TP or lower slippage`);
+    return;
+  }
+  const netProfitAtTP = ((tpPct / 100) - totalCostFrac) * t.buy_amount_sol;
+  log(`✅ AI approves ${token.symbol} | Conf: ${ai.confidence}% | Net profit if TP hit: +${netProfitAtTP.toFixed(4)} SOL (after fees+slippage) | Reason: ${ai.reason}`);
 
   if (!t.auto_trade) {
     log(`📝 [PAPER] Auto-trade OFF — would BUY ${token.symbol} @ ${t.buy_amount_sol} SOL (AI: ${ai.confidence}%)`);
     const pnlPct = ai.confidence >= 75 ? (Math.random()*80+20) : ai.confidence >= 60 ? (Math.random()*60-20) : (Math.random()*40-30);
+    const paperRawPct = ai.confidence >= 75 ? (Math.random() * 80 + 20)
+                       : ai.confidence >= 55 ? (Math.random() * 60 - 15)
+                       :                       (Math.random() * 50 - 30);
+    const paperFeesPct  = ((t.slippage_bps / 10000) * 2 + 0.006) * 100;
+    const paperFeesSol  = 0.000005 * 2 + (t.priority_fee_lamports / LAMPORTS_PER_SOL) * 2;
     const paper = {
-      mint: token.mint, symbol: token.symbol||token.mint.slice(0,8),
-      buySol: t.buy_amount_sol, feesPaidSol: 0.0005,
-      buyTime: Date.now(), sellTime: Date.now()+1000,
-      aiConfidence: ai.confidence, closeReason: 'paper_trade',
-      pnlPct, pnlSol: (pnlPct/100)*t.buy_amount_sol, status: 'paper'
+      mint         : token.mint,
+      symbol       : token.symbol || token.mint.slice(0,8),
+      buySol       : t.buy_amount_sol,
+      feesPaidSol  : (paperFeesPct / 100) * t.buy_amount_sol + paperFeesSol,
+      buyTime      : Date.now(),
+      sellTime     : Date.now() + 1000,
+      aiConfidence : ai.confidence,
+      closeReason  : 'paper_trade',
+      pnlPct       : paperRawPct - paperFeesPct,
+      status       : 'paper'
     };
-    trades.push(paper); saveTrades();
+    paper.pnlSol = (paper.pnlPct / 100) * paper.buySol;
+    log('[PAPER] ' + token.symbol + ' raw:' + (paperRawPct >= 0 ? '+' : '') + paperRawPct.toFixed(1) + '% fees:-' + paperFeesPct.toFixed(1) + '% net:' + (paper.pnlPct >= 0 ? '+' : '') + paper.pnlPct.toFixed(1) + '%');
+    trades.push(paper);
+    saveTrades();
     totalProfit += paper.pnlSol;
     io.emit('tradeClosed', paper);
     io.emit('statsUpdate', { totalProfit, tradeCount: trades.length });
@@ -485,27 +511,34 @@ async function analyzeWithAI(token, liqSol, mcUsd) {
   const now   = Date.now() / 1000;
   const ageSec= now - (token.created_timestamp || now);
 
-  const prompt = `You are a Solana memecoin trading AI. Analyze this new token and decide BUY or SKIP.
+  const prompt = `You are a Solana pump.fun memecoin sniper AI. Your job is to find early-entry gems.
+
+CRITICAL CONTEXT — READ THIS FIRST:
+- These tokens are brand new (seconds old) from pump.fun bonding curve
+- NO website, NO twitter, NO telegram at launch is COMPLETELY NORMAL — do NOT penalize for missing socials
+- Mint authority exists on ALL pump.fun tokens (bonding curve holds it) — this is NOT a red flag
+- You are sniping at launch, before any social presence is built
+- Focus ONLY on name/symbol meme strength and market structure
 
 Token Data:
 - Name: ${token.name || 'Unknown'}
 - Symbol: ${token.symbol || 'Unknown'}
-- Mint: ${token.mint}
-- Age: ${Math.round(ageSec)} seconds old
+- Age: ${Math.round(ageSec)} seconds
 - Market Cap: $${mcUsd.toFixed(0)} USD
 - Liquidity: ${liqSol.toFixed(2)} SOL
-- Description: ${(token.description || 'None').slice(0, 200)}
-- Reply Count: ${token.reply_count || 0}
-- Website: ${token.website || 'None'}
-- Twitter: ${token.twitter || 'None'}
-- Telegram: ${token.telegram || 'None'}
-- King of the Hill Rank: ${token.king_of_the_hill_timestamp ? 'Yes' : 'No'}
+- Description: ${(token.description || 'none').slice(0, 150)}
 
-Evaluate:
-1. Does the name/symbol suggest viral meme potential?
-2. Is liquidity and MC in a good sniper range?
-3. Are social signals present?
-4. Is there any obvious rug-pull red flag?
+Scoring criteria (judge each 0-10):
+1. MEME NAME STRENGTH — Is the name/symbol catchy, funny, or trending? (e.g. animal names, political figures, internet memes, food = good)
+2. MARKET STRUCTURE — MC $1k-$50k with >5 SOL liquidity = ideal sniper entry
+3. RED FLAGS — Obvious scam words ("safe", "moon", "100x", "elon", "guaranteed"), nonsense random characters, or copy of existing token = SKIP
+
+Decision rules:
+- Score 1 >= 6 AND score 2 >= 6 AND score 3 = 0 red flags → BUY with confidence 60-85
+- Score 1 >= 4 AND score 2 >= 5 AND score 3 = 0 red flags → BUY with confidence 45-65
+- Any red flags OR score 1 < 4 → SKIP
+
+Default to BUY when uncertain — missing information is NOT a reason to SKIP.
 
 Respond ONLY in this exact JSON format (no extra text):
 {
@@ -521,7 +554,7 @@ Respond ONLY in this exact JSON format (no extra text):
       body   : JSON.stringify({
         model   : config.deepseek.model || 'deepseek-chat',
         messages: [{ role: 'user', content: prompt }],
-        temperature: 0.3,
+        temperature: 0.1,
         max_tokens : 200
       }),
       timeout: 15000
