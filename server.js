@@ -695,6 +695,7 @@ async function signAndSendTransaction(swapTransactionBase64) {
 }
 
 // ─── Position Monitor ────────────────────────────────────────
+// Uses SOL-in vs SOL-out comparison — avoids per-token decimal unit bugs
 async function checkPositions() {
   if (!botRunning) return;
   const mints = Object.keys(activeTrades);
@@ -703,66 +704,53 @@ async function checkPositions() {
   for (const mint of mints) {
     const trade = activeTrades[mint];
     try {
-      const price = await getTokenPriceSOL(mint, trade.buySol, trade.estimatedTokens);
-      if (!price) continue;
+      // Get a real exit quote: token -> SOL (same units as buySol)
+      const sellQuote = await getJupiterQuote(mint, SOL_MINT, trade.estimatedTokens, config.trading.slippage_bps);
+      if (!sellQuote) {
+        log('No sell quote yet for ' + trade.symbol + ' — holding');
+        continue;
+      }
 
-      const pnlPct = ((price - trade.buyPriceSOL) / trade.buyPriceSOL) * 100;
-      const pnlSol = (price * trade.estimatedTokens / 1e9) - trade.buySol - trade.feesPaidSol;
+      const solOut    = parseInt(sellQuote.outAmount) / LAMPORTS_PER_SOL;
+      const sellFee   = 0.000005 + (config.trading.priority_fee_lamports / LAMPORTS_PER_SOL) + (solOut * 0.003);
+      const netSolOut = solOut - sellFee;
+      // PnL = net SOL received minus what we originally spent (buy amount + buy fees)
+      const pnlSol    = netSolOut - trade.buySol - trade.feesPaidSol;
+      const pnlPct    = (pnlSol / trade.buySol) * 100;
 
-      trade.currentPriceSol = price;
-      trade.pnlPct          = pnlPct;
-      trade.pnlSol          = pnlSol;
-
+      trade.pnlPct = pnlPct;
+      trade.pnlSol = pnlSol;
       io.emit('tradeUpdate', trade);
 
       const age = (Date.now() - trade.buyTime) / 60000; // minutes
 
       // ── Take Profit ──
       if (pnlPct >= trade.takeProfitPct) {
-        log(`🎯 TAKE PROFIT hit on ${trade.symbol}: +${pnlPct.toFixed(1)}%`);
+        log('TAKE PROFIT hit on ' + trade.symbol + ': +' + pnlPct.toFixed(1) + '%');
         await closeTrade(mint, 'take_profit');
         continue;
       }
 
       // ── Stop Loss ──
       if (pnlPct <= -trade.stopLossPct) {
-        log(`🛑 STOP LOSS hit on ${trade.symbol}: ${pnlPct.toFixed(1)}%`);
+        log('STOP LOSS hit on ' + trade.symbol + ': ' + pnlPct.toFixed(1) + '%');
         await closeTrade(mint, 'stop_loss');
         continue;
       }
 
       // ── Time Stop ──
       if (age >= config.trading.time_stop_minutes) {
-        log(`⏰ TIME STOP on ${trade.symbol}: ${age.toFixed(0)} min elapsed`);
+        log('TIME STOP on ' + trade.symbol + ': ' + age.toFixed(0) + ' min elapsed');
         await closeTrade(mint, 'time_stop');
         continue;
       }
 
+      log(trade.symbol + ' position: ' + (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(1) + '% (' + (pnlSol >= 0 ? '+' : '') + pnlSol.toFixed(5) + ' SOL) | age ' + age.toFixed(0) + 'min');
+
     } catch (e) {
-      log(`⚠️  Position check error (${trade.symbol}): ${e.message}`);
+      log('Position check error (' + trade.symbol + '): ' + e.message);
     }
   }
-}
-
-// ─── Get Current Token Price ──────────────────────────────────
-async function getTokenPriceSOL(mint, buySol, estimatedTokens) {
-  // Strategy: get a reverse Jupiter quote (token → SOL) to get real exit price
-  try {
-    // Use Jupiter price API first (faster)
-    const res = await fetch(`${JUPITER_PRICE}?ids=${mint}&vsToken=${SOL_MINT}`, { timeout: 8000 });
-    if (res.ok) {
-      const data  = await res.json();
-      const price = data?.data?.[mint]?.price;
-      if (price) return parseFloat(price);
-    }
-    // Fallback: quote token → SOL
-    const quote = await getJupiterQuote(mint, SOL_MINT, estimatedTokens, config.trading.slippage_bps);
-    if (quote) {
-      const solOut = parseInt(quote.outAmount) / LAMPORTS_PER_SOL;
-      return solOut / (estimatedTokens / 1e9); // price per token in SOL
-    }
-    return null;
-  } catch { return null; }
 }
 
 // ─── Close Trade (Sell) ──────────────────────────────────────
